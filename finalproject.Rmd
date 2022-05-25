@@ -1,0 +1,310 @@
+---
+title: "final project"
+author: "Rachel Brunner"
+date: "5/13/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+pacman::p_load(tidyverse, magrittr, data.table, skimr, missForest, R.utils, missForest, YARF, xtable, mlr, rJava)
+housing_data = fread("https://raw.githubusercontent.com/kapelner/QC_MATH_342W_Spring_2021/master/writing_assignments/housing_data_2016_2017.csv")
+write.csv(housing_data,"housingdata.csv")
+```
+
+```{r}
+set.seed(2002)
+housing_data %<>%
+  select(-HITId, -HITTypeId, -Title, -Description, -Keywords, -Reward, -CreationTime, -MaxAssignments, -RequesterAnnotation, -AssignmentDurationInSeconds, -AutoApprovalDelayInSeconds, -Expiration, -NumberOfSimilarHITs, -LifetimeInSeconds, -AssignmentId, -WorkerId, -AssignmentStatus, -AcceptTime, -SubmitTime, -AutoApprovalTime, -ApprovalTime, -RejectionTime, -RequesterFeedback, -WorkTimeInSeconds, -LifetimeApprovalRate, -Last30DaysApprovalRate, -Last7DaysApprovalRate, -URL, -community_district_num, -date_of_sale, -fuel_type, -listing_price_to_nearest_1000, -url, -model_type, -num_floors_in_building)
+```
+
+```{r}
+housing_data <- housing_data %>%
+mutate(zip_codes = gsub("[^0-9.-]", "", full_address_or_zip_code))
+  
+  
+housing_data <- housing_data %>%
+mutate(zip_codes = str_sub(zip_codes, -5, -1)) 
+  
+  
+
+
+write.csv(housing_data,"housingdata.csv")  #export data to view
+
+```
+
+```{r}
+mod_data <- fread("housingdata.csv")
+mod_data <- mod_data %>%
+  select(-full_address_or_zip_code)
+
+mod_data = mod_data[mod_data$zip_codes !="17-30",] #removed the two rows that had bad zip codes or addresses
+
+
+
+mod_data %<>%
+  mutate(zip_codes = as.factor(case_when(
+    zip_codes == "11361" | zip_codes == "11362" | zip_codes == "11363" | zip_codes == "11364" ~ "Northeast Queens", 
+    zip_codes == "11354" | zip_codes == "11355" | zip_codes == "11356" | zip_codes == "11357" | zip_codes == "11358" | zip_codes == "11359" | zip_codes == "11360" ~ "North Queens",
+    zip_codes == "11365" | zip_codes == "11366" | zip_codes == "11367" ~ "Central Queens",
+    zip_codes == "11412" | zip_codes == "11423" | zip_codes == "11432" | zip_codes == "11433" | zip_codes == "11434" | zip_codes == "11435" | zip_codes == "11436" ~ "Jamaica",
+    zip_codes == "11101" | zip_codes == "11102" | zip_codes == "11103" | zip_codes == "11104" | zip_codes == "11105" | zip_codes == "11106"~ "Northwest Queens",
+    zip_codes == "11374" | zip_codes == "11375" | zip_codes == "11379" | zip_codes == "11385" ~ "West Central Queens",
+    zip_codes == "11004" | zip_codes == "11005" | zip_codes == "11411" | zip_codes == "11413" | zip_codes == "11422" | zip_codes == "11426" | zip_codes == "11427" | zip_codes == "11428" | zip_codes == "11429"~ "Southeast Queens",
+    zip_codes == "11414" | zip_codes == "11415" | zip_codes == "11416" | zip_codes == "11417" | zip_codes == "11418" | zip_codes == "11419" | zip_codes == "11420"  | zip_codes == "11421" ~ "Southwest Queens",
+    zip_codes == "11368" | zip_codes == "11369" | zip_codes == "11370" | zip_codes == "11372" | zip_codes == "11373" | zip_codes == "11377" | zip_codes == "11378"  ~ "West Queens",
+    TRUE ~ "Other"
+           )))
+```
+
+```{r}
+mod_data %<>%
+mutate(common_charges = as.integer(str_remove_all(common_charges, "[$,]")),
+         maintenance_cost = as.integer(str_remove_all(maintenance_cost, "[$,]")),
+         sale_price = as.integer(str_remove_all(sale_price, "[$,]" )),
+         parking_charges = as.integer(str_remove_all(parking_charges, "[$,]" )),
+         total_taxes = as.integer(str_remove_all(total_taxes, "[$,]" ))) 
+#Remove all dollar signs
+mod_data <- data.frame(mod_data) 
+
+mod_data['monthly_costs'] <- NA
+
+mod_data <- mod_data %>%
+mutate(total_taxes = total_taxes / 12) #divided total taxes by 12 to get total taxes per month, so now all charges are monthly rates
+
+
+as.numeric(mod_data$common_charges)
+as.numeric(mod_data$maintenance_cost)
+as.numeric(mod_data$parking_charges)
+as.numeric(mod_data$total_taxes)
+       
+mod_data <- mod_data %>%
+mutate(total_taxes = as.numeric(replace(total_taxes, is.na(total_taxes), 0))) #replaced all NA's with 0
+
+mod_data <- mod_data %>%
+mutate(maintenance_cost = as.numeric(replace(maintenance_cost, is.na(maintenance_cost), 0))) #replaced all NA's with 0
+
+mod_data <- mod_data %>%
+mutate(parking_charges = as.numeric(replace(parking_charges, is.na(parking_charges), 0))) #replaced all NA's with 0
+
+mod_data <- mod_data %>%
+mutate(common_charges = as.numeric(replace(common_charges, is.na(common_charges), 0))) #replaced all NA's with 0
+
+
+mod_data <- mod_data %>%
+mutate(monthly_costs = mod_data$common_charges + mod_data$maintenance_cost + mod_data$parking_charges + mod_data$total_taxes) 
+
+
+
+mod_data %<>%
+  select(-common_charges, -maintenance_cost, -parking_charges, -total_taxes)  #deleted these costs because we combined them into one column called monthly_costs    
+
+
+mod_data <- mod_data %>%
+mutate(num_half_bathrooms = replace(num_half_bathrooms, is.na(num_half_bathrooms), 0)) #turned all na.
+
+
+#write.csv(mod_data,"moddata.csv")  #export data to view
+
+```
+
+
+
+```{r}
+mod_data2 <- fread("moddata.csv")
+
+mod_data2 %<>%
+mutate(kitchen_type = as.factor(case_when(
+                kitchen_type == "efficiency" ~ "Efficiency", 
+                kitchen_type =="Combo" ~"Combo",
+                kitchen_type == "eat in" ~ "Eat_In"))) %<>%
+mutate(dogs_allowed = as.factor(case_when(
+            dogs_allowed == "yes" ~ "yes",
+            dogs_allowed == "no" ~ "no")))  %<>%
+mutate(cats_allowed = as.factor(case_when(
+            cats_allowed == "yes" ~ "yes",
+            cats_allowed == "no" ~ "no"))) %<>%
+mutate(garage_exists = as.factor(case_when(
+            garage_exists == "yes" ~ "yes",
+            garage_exists == "no" ~ "no"))) %<>%
+mutate(coop_condo = as.factor(case_when(
+            coop_condo == "co-op" ~ "co-op",
+            coop_condo == "condo" ~ "condo"))) %<>%
+mutate(dining_room_type = as.factor(case_when(
+            dining_room_type == "combo" ~ "combo",
+            dining_room_type == "dining area" ~ "dining_area",
+            dining_room_type == "formal" ~ "formal"))) %<>%
+mutate(zip_codes = as.factor(case_when(
+    zip_codes == "North Queens" ~ "North Queens",
+    zip_codes == "Central Queens" ~ "Central Queens",
+    zip_codes == "Jamaica" ~ "Jamaica",
+    zip_codes == "Northwest Queens" ~ "Northwest Queens",
+    zip_codes == "West Central Queens" ~ "West Central Queens",
+    zip_codes == "Southeast Queens" ~ "Southeast Queens",
+    zip_codes == "Southwest Queens" ~ "Southwest Queens",
+    zip_codes == "West Queens"  ~ "West Queens",
+    TRUE ~ "Other")))
+  
+```
+
+```{r}
+#skim(housing_data)
+M = tbl_df(apply(is.na(mod_data2), 2, as.numeric))
+colnames(M) = paste(colnames(mod_data2), "_is_missing", sep = "")
+M = tbl_df(t(unique(t(M))))
+M %<>% 
+  select_if(function(x){sum(x) > 0})
+skim(M)
+housing_data2 = cbind(mod_data2, M)
+skim(housing_data2)
+summary(housing_data2)
+
+str(housing_data2)
+
+```
+
+
+```{r} 
+features_without_responses = housing_data2 %>%
+  filter(is.na(sale_price)) #group data based on missing y values/responses
+features_with_responses = housing_data2 %>%
+  filter(!is.na(sale_price)) #group data based on available y valus/responses
+
+n = nrow(features_with_responses) #there are 528 observations with responses 
+k = 10 #train/test split proportion
+
+test_index = sample(1 : n, 1 / k * n)
+train_index = setdiff(1 : n, test_index)
+
+n_test = as.integer((1 / k) * n)
+n_train = as.integer(n - n_test)
+
+train = features_with_responses[train_index, ]
+test = features_with_responses[test_index, ]
+
+X_test = test %>%
+  mutate(sale_price = NA)
+y_test = test$sale_price
+
+housing_missing = rbind(train, X_test, features_without_responses) #can use all data except y_test (to use it would be cheating)
+
+housing_complete = missForest(housing_missing)$ximp
+sum(is.na(housing_complete))
+
+housing = housing_complete %>%
+  filter(sale_price_is_missing == 0) %>%
+  select(-sale_price_is_missing) 
+```
+
+
+```{r}
+#post imputation traint test split 
+housing_train = housing[1:n_train, ]
+housing_test = housing[(n_train+1):n, ]
+housing_test$sale_price = y_test
+
+
+sum(is.na(housing_train)) # check for null values
+sum(is.na(housing_test))  # check for null values
+
+housing_Xtrain = housing_train
+housing_Xtrain$sale_price = NULL
+housing_ytrain = housing_train$sale_price
+
+housing_Xtest = housing_test
+housing_Xtest$sale_price = NULL
+housing_ytest = housing_test$sale_price
+
+
+#regression tree
+#Regression Tree Model
+
+options(java.parameters = "-Xmx4000m")
+
+reg_tree = YARFCART(housing_Xtrain, housing_ytrain)
+reg_tree
+get_tree_num_nodes_leaves_max_depths(reg_tree)
+tree_image = illustrate_trees(reg_tree, max_depth = 5, open_file = TRUE, length_in_px_per_half_split = 40)
+
+#in-sample stats
+yhat_train = predict(reg_tree, housing_Xtrain)
+e = housing_ytrain - yhat_train
+sd(e) #s_e
+1 - sd(e) / sd(housing_ytrain) #R^2
+
+#oos stats
+yhat_test_tree = predict(reg_tree, housing_Xtest)
+e = housing_ytest - yhat_test_tree
+sd(e)
+1 - sd(e) / sd(housing_ytest)
+
+
+```
+```{r}
+ 
+lmod = lm(housing_ytrain ~ ., housing_Xtrain)
+lmod
+
+#in-sample stats
+summary(lmod)$sigma
+summary(lmod)$r.squared
+summary(lmod)
+
+
+
+#oos stats
+yhat_test_linear = predict(lmod, housing_Xtest)
+e = housing_ytest - yhat_test_linear
+sd(e)
+1 - sd(e) / sd(housing_ytest)
+
+
+```
+
+
+
+
+
+
+
+```{r}
+#Random forest
+
+mlr_data = cbind(housing_ytrain, housing_Xtrain)
+colnames(mlr_data)[1] = "sales_price"
+task = makeRegrTask(data = mlr_data, target = "sales_price")
+
+parms = makeParamSet(
+  makeIntegerParam("mtry", lower = 1, upper = ncol(housing_Xtrain)),
+  makeIntegerParam("ntree", lower = 1, upper = 200),
+  makeIntegerParam("nodesize", lower = 1, upper = 200)
+)
+
+
+desc <- makeResampleDesc("CV", iters = 30)
+ctrl <- makeTuneControlRandom(maxit = 30)
+mlr_ret <- tuneParams("regr.randomForest", task = task, resampling = desc, par.set = parms, control = ctrl, measures = list(rmse))
+
+#Optimal result
+mlr_ret
+#learner = makeLearner("regr.randomForest", par.vals = list(mtry=19, nodesize=21, ntree=99))
+#measures = list(rmse, mtry, nodesize)
+```
+
+
+
+```{r}
+rf_mod = YARF(housing_Xtrain, housing_ytrain, mtry= 19, num_trees = 197, nodesize = 15)
+rf_mod
+yhat = predict(rf_mod, housing_Xtest)
+
+
+oos_rmse = sqrt(mean((housing_ytest - yhat)^2))
+oos_rsq = 1 - sum((housing_ytest - yhat)^2)/sum((housing_ytest - mean(housing$sale_price))^2)
+oos_rmse
+oos_rsq
+```
+
+
+
